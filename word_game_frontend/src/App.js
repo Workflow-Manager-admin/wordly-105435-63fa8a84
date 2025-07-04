@@ -154,42 +154,58 @@ const NUM_COLS = 5;
 const getBlankGrid = () =>
   Array.from({ length: NUM_ROWS }, () => Array(NUM_COLS).fill(''));
 
-// Simulated backend feedback for demo; real version would call the backend
-const mockCheckGuess = (guess, answer) => {
-  // Returns array: 'correct' (green), 'present' (yellow), 'absent' (gray) per letter
-  let out = Array(NUM_COLS).fill('absent');
-  let taken = Array(NUM_COLS).fill(false);
-  // First pass for correct
-  for (let i = 0; i < NUM_COLS; ++i) {
-    if (guess[i] === answer[i]) {
-      out[i] = 'correct';
-      taken[i] = true;
-    }
-  }
-  // Second pass for present
-  for (let i = 0; i < NUM_COLS; ++i) {
-    if (out[i] !== 'correct') {
-      for (let j = 0; j < NUM_COLS; ++j) {
-        if (!taken[j] && guess[i] === answer[j]) {
-          out[i] = 'present';
-          taken[j] = true;
-          break;
-        }
-      }
-    }
-  }
-  return out;
-};
+/**
+ * Backend API utility functions for REST interactions.
+ * Assumes backend is reachable at relative path (same host/port in dev/proxy).
+ */
+const apiBase = ''; // '' means relative; change if using a different host.
 
-// Returns a random 5-letter word for demonstration.
-const getRandomWord = () => {
-  // For demo, this can be a static set or in future from backend API.
-  const WORD_LIST = ['PLANT', 'BRAVE', 'QUICK', 'LOGIC', 'MANGO', 'ROUTE', 'CANDY', 'SHINE', 'STORY', 'CHAIR', 'GROWL'];
-  const idx = Math.floor(Math.random() * WORD_LIST.length);
-  return WORD_LIST[idx];
-};
+async function fetchNewGame() {
+  // PUBLIC_INTERFACE
+  // Calls GET /api/new-game -> returns { word } or server-managed game state
+  const resp = await fetch(`${apiBase}/api/new-game`);
+  if (!resp.ok) throw new Error("Failed to start a new game");
+  // Example: { word: 'CHAIR' } or { gameId, ... }
+  return resp.json();
+}
+async function submitGuess(guess) {
+  // PUBLIC_INTERFACE
+  // POST /api/guess -> body: { guess } -> returns { result: ["correct", ...], valid: bool, message }
+  const resp = await fetch(`${apiBase}/api/guess`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ guess }),
+  });
+  if (!resp.ok) {
+    let msg = "Error submitting guess";
+    try { msg = (await resp.json()).message || msg; } catch {}
+    throw new Error(msg);
+  }
+  return resp.json();
+}
+async function fetchLeaderboard() {
+  // PUBLIC_INTERFACE
+  // GET /api/leaderboard -> returns { leaderboard: [{ name, attempts }, ...] }
+  const resp = await fetch(`${apiBase}/api/leaderboard`);
+  if (!resp.ok) throw new Error("Failed to load leaderboard");
+  return resp.json();
+}
+async function submitScore({ name, attempts }) {
+  // PUBLIC_INTERFACE
+  // POST /api/submit-score -> body: { name, attempts } -> { success: true/false, leaderboard }
+  const resp = await fetch(`${apiBase}/api/submit-score`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name, attempts }),
+  });
+  if (!resp.ok) {
+    let msg = "Score submit failed";
+    try { msg = (await resp.json()).message || msg; } catch {}
+    throw new Error(msg);
+  }
+  return resp.json();
+}
 
-// PUBLIC_INTERFACE
 function App() {
   // Game state and feedback
   const [theme, setTheme] = useState('light');
@@ -197,12 +213,12 @@ function App() {
   const [grid, setGrid] = useState(getBlankGrid());
   const [currentRow, setCurrentRow] = useState(0);
   const [currentCol, setCurrentCol] = useState(0);
-  const [guessResults, setGuessResults] = useState([]); // Array of feedback arrays
+  const [guessResults, setGuessResults] = useState([]); // feedback array from backend
   const [gameOver, setGameOver] = useState(false);
   const [message, setMessage] = useState('');
-  const [answer, setAnswer] = useState(getRandomWord);
+  const [answer, setAnswer] = useState(''); // Only populated locally for showing result; backend is authority
   const [disableInput, setDisableInput] = useState(false);
-  const [usedKeys, setUsedKeys] = useState({}); // {A: 'correct' | 'present' | 'absent'}
+  const [usedKeys, setUsedKeys] = useState({});
 
   // Modals for win/lose popup and leaderboard/name dialog
   const [showWinModal, setShowWinModal] = useState(false);
@@ -210,8 +226,9 @@ function App() {
   const [showNameModal, setShowNameModal] = useState(false);
   const [showLeaderboard, setShowLeaderboard] = useState(false);
 
-  // Simple local leaderboard as array [{name, attempts}]
   const [leaderboard, setLeaderboard] = useState([]);
+
+  const [gameLoading, setGameLoading] = useState(true); // to show spinner on initial load/reset
 
   const boardRef = useRef(null);
 
@@ -219,6 +236,13 @@ function App() {
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
   }, [theme]);
+
+  // Fetch new game on mount (or after score submission/newgame)
+  useEffect(() => {
+    // On initial mount or reset, start a new game by calling API
+    startNewGame(); // Will handle loading indications
+    // eslint-disable-next-line
+  }, []);
 
   // Handle physical keyboard input
   useEffect(() => {
@@ -246,20 +270,30 @@ function App() {
   };
 
   // PUBLIC_INTERFACE
-  const startNewGame = () => {
+  const startNewGame = async () => {
+    setGameLoading(true);
+    setDisableInput(true);
     setGrid(getBlankGrid());
     setCurrentRow(0);
     setCurrentCol(0);
     setGuessResults([]);
     setGameOver(false);
     setMessage('');
-    setDisableInput(false);
-    setAnswer(getRandomWord());
+    setAnswer('');
     setUsedKeys({});
     setShowWinModal(false);
     setShowLoseModal(false);
     setShowNameModal(false);
     setScreen('game');
+    try {
+      const data = await fetchNewGame(); // e.g., { word }
+      setAnswer(data.word || ''); // Only used for display after loss/win (not used for validation)
+    } catch (err) {
+      setMessage(err.message || "Failed to start game");
+    } finally {
+      setGameLoading(false);
+      setDisableInput(false);
+    }
   };
 
   // PUBLIC_INTERFACE
@@ -287,7 +321,7 @@ function App() {
   }
 
   // PUBLIC_INTERFACE
-  function onEnter() {
+  async function onEnter() {
     if (
       !disableInput &&
       !gameOver &&
@@ -295,7 +329,7 @@ function App() {
       grid[currentRow].join('').length === NUM_COLS
     ) {
       let guess = grid[currentRow].join('').toUpperCase();
-      // For demo: just check length; in full version, also check valid word via API.
+
       if (!/^[A-Z]{5}$/.test(guess)) {
         setMessage('Not a valid 5-letter word');
         return;
@@ -303,37 +337,54 @@ function App() {
 
       setDisableInput(true);
 
-      // Here, we'd POST to backend to validate/score. Use mock for now.
-      setTimeout(() => {
-        const feedback = mockCheckGuess(guess, answer);
+      try {
+        // Call backend for guess validation and feedback
+        // Expected resp: { result: ["correct", ...], valid: bool, message?, correct? }
+        const resp = await submitGuess(guess);
+        if (!resp.valid) {
+          setMessage(resp.message || "Not a valid guess");
+          setDisableInput(false);
+          return;
+        }
+        const feedback = resp.result;
         setGuessResults(prev => [...prev, feedback]);
-
-        // Update usedKeys status (keep "correct" if already found)
+        // Update usedKeys
         setUsedKeys(prevUsed => {
           const updated = { ...prevUsed };
           for (let i = 0; i < NUM_COLS; ++i) {
             const k = guess[i];
-            if (!updated[k] || updated[k] === 'present' && feedback[i] === 'correct' || updated[k] === 'absent' && feedback[i] !== 'absent') {
+            if (
+              !updated[k] ||
+              (updated[k] === 'present' && feedback[i] === 'correct') ||
+              (updated[k] === 'absent' && feedback[i] !== 'absent')
+            ) {
               updated[k] = feedback[i];
             }
           }
           return updated;
         });
 
-        if (guess === answer) {
+        // Handle correct guess or out of tries
+        // if resp.correct is set (backend signals win), use it; else check if all "correct"
+        const isWin = (resp.correct === true) ||
+          (Array.isArray(feedback) && feedback.every(x => x === "correct"));
+        if (isWin) {
           setGameOver(true);
           setDisableInput(true);
-          setTimeout(() => setShowWinModal(true), 350);
+          setTimeout(() => setShowWinModal(true), 400);
         } else if (currentRow + 1 === NUM_ROWS) {
           setGameOver(true);
           setDisableInput(true);
-          setTimeout(() => setShowLoseModal(true), 350);
+          setTimeout(() => setShowLoseModal(true), 400);
         } else {
           setCurrentRow(r => r + 1);
           setCurrentCol(0);
           setDisableInput(false);
         }
-      }, 300);
+      } catch (err) {
+        setMessage(err.message || "Failed to submit guess");
+        setDisableInput(false);
+      }
     } else if (!disableInput && !gameOver && currentCol !== NUM_COLS) {
       setMessage('Not enough letters');
     }
@@ -353,6 +404,28 @@ function App() {
     const tid = setTimeout(() => setMessage(''), 1800);
     return () => clearTimeout(tid);
   }, [message]);
+
+  // Effect to load leaderboard from backend when requested
+  useEffect(() => {
+    if (screen !== "leaderboard") return;
+    let cancelled = false;
+    setMessage("Loading leaderboard...");
+    fetchLeaderboard()
+      .then(data => {
+        if (!cancelled) {
+          setLeaderboard(data.leaderboard || []);
+          setMessage("");
+        }
+      })
+      .catch(err => {
+        if (!cancelled) {
+          setLeaderboard([]);
+          setMessage(err.message || "Failed to load leaderboard");
+        }
+      });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line
+  }, [screen]);
 
   // PUBLIC_INTERFACE
   function renderGrid() {
@@ -509,11 +582,13 @@ function App() {
         </div>
         {/* Main Content: switch between leaderboard and main game */}
         {screen === 'leaderboard' ? (
-          <LeaderboardModal
-            open={true}
-            onClose={() => setScreen('game')}
-            entries={leaderboard}
-          />
+          <React.Fragment>
+            <LeaderboardModal
+              open={true}
+              onClose={() => setScreen('game')}
+              entries={leaderboard}
+            />
+          </React.Fragment>
         ) : (
           <div style={{
             display: 'flex',
@@ -598,18 +673,28 @@ function App() {
             <NameInputModal
               open={showNameModal}
               onClose={() => setShowNameModal(false)}
-              onSubmit={name => {
-                // Add score to local leaderboard
+              onSubmit={async (name) => {
+                // Submit score to backend and then load updated leaderboard
                 setShowNameModal(false);
-                // Sanitize name (1-16 chars, no bad words for demo)
                 let sanitized = (name||"").trim().slice(0,16).replace(/[^a-z0-9 -]/gi, "");
                 if (!sanitized) sanitized = "Player";
-                setLeaderboard(prev => {
-                  let updated = [...prev, { name: sanitized, attempts: currentRow + 1 }];
-                  updated.sort((a, b) => a.attempts - b.attempts); // Lower is better
-                  return updated.slice(0, 25); // Limit to top 25 for demo
-                });
-                setTimeout(() => setScreen("leaderboard"), 400);
+                try {
+                  setMessage("Submitting score...");
+                  await submitScore({ name: sanitized, attempts: currentRow + 1 });
+                  // Now, fetch leaderboard
+                  const data = await fetchLeaderboard();
+                  setLeaderboard(data.leaderboard || []);
+                  setMessage("");
+                  setTimeout(() => setScreen("leaderboard"), 400);
+                } catch (err) {
+                  setMessage(err.message || "Submission failed");
+                  // Still show leaderboard, try to fetch anyway for a "resilient" UX
+                  try {
+                    const data = await fetchLeaderboard();
+                    setLeaderboard(data.leaderboard || []);
+                  } catch {}
+                  setTimeout(() => setScreen("leaderboard"), 500);
+                }
               }}
             />
           </div>
