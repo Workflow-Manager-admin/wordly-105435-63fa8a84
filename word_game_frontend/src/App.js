@@ -40,40 +40,91 @@ function Modal({ open, onClose, children, ariaLabel }) {
   );
 }
 
-// Minimal leaderboard UI (local only)
+/**
+ * Enhanced leaderboard modal, showing rank, name, attempts
+ * Receives real leaderboard entries from the backend.
+ */
 function LeaderboardModal({ open, onClose, entries }) {
   return (
     <Modal open={open} onClose={onClose} ariaLabel="Leaderboard">
       <h3 style={{ textAlign: "center", margin: 0, letterSpacing: 2 }}>Leaderboard</h3>
-      <div style={{ margin: "12px 0 16px 0", fontSize: 13, color: "var(--text-secondary)", textAlign: "center" }}>
-        Fastest wins, sorted by attempts (lower is better)
+      <div style={{
+        margin: "12px 0 16px 0",
+        fontSize: 13,
+        color: "var(--text-secondary)",
+        textAlign: "center"
+      }}>
+        Fastest wins—sorted by attempts (lower is better)
       </div>
-      <table style={{ width: "100%", borderCollapse: "collapse" }}>
-        <thead>
-          <tr style={{ borderBottom: "1px solid var(--border-color)" }}>
-            <th style={{ textAlign: "left", padding: 4, fontWeight: 600 }}>Rank</th>
-            <th style={{ textAlign: "left", padding: 4, fontWeight: 600 }}>Name</th>
-            <th style={{ textAlign: "right", padding: 4, fontWeight: 600 }}>Tries</th>
-          </tr>
-        </thead>
-        <tbody>
-          {entries && entries.length ?
-            entries.map((e, idx) => (
-              <tr key={e.name + "-" + e.attempts + "-" + idx} style={{
-                borderBottom: "1px solid var(--border-color)",
-                background: idx === 0 ? "rgba(46,204,113,0.1)" : "transparent"
-              }}>
-                <td style={{ padding: 4, fontWeight: idx === 0 ? 700 : 400 }}>{idx + 1}</td>
-                <td style={{ padding: 4 }}>{e.name || "Player"}</td>
-                <td style={{ padding: 4, textAlign: "right" }}>{e.attempts}</td>
+      <div style={{
+        maxHeight: 340,
+        overflowY: "auto",
+        borderRadius: 6,
+        border: "1px solid var(--border-color)",
+        marginBottom: 14
+      }}>
+        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <thead>
+            <tr style={{ borderBottom: "1px solid var(--border-color)" }}>
+              <th style={{
+                textAlign: "left", padding: 7, fontWeight: 600, fontSize: 15, minWidth: 54
+              }}>Rank</th>
+              <th style={{
+                textAlign: "left", padding: 7, fontWeight: 600, fontSize: 15, minWidth: 80
+              }}>Name</th>
+              <th style={{
+                textAlign: "right", padding: 7, fontWeight: 600, fontSize: 15, minWidth: 54
+              }}>Attempts</th>
+            </tr>
+          </thead>
+          <tbody>
+            {(entries && entries.length > 0) ? entries.map((user, idx) => (
+              <tr key={user.name + "-" + user.attempts + "-" + idx}
+                  style={{
+                    borderBottom: "1px solid var(--border-color)",
+                    background: idx === 0 ? "rgba(46,204,113,0.10)" : (idx % 2 === 1 ? "rgba(80,180,255,0.048)" : "transparent")
+                  }}>
+                <td style={{
+                  padding: 7,
+                  fontWeight: idx === 0 ? 700 : 400,
+                  color: idx === 0 ? "#2ecc71" : undefined
+                }}>
+                  {idx + 1}
+                </td>
+                <td style={{
+                  padding: 7,
+                  fontWeight: 500,
+                  textOverflow: "ellipsis",
+                  maxWidth: 110,
+                  overflow: "hidden",
+                  whiteSpace: "nowrap"
+                }}>
+                  {user.name || "Player"}
+                </td>
+                <td style={{
+                  padding: 7,
+                  textAlign: "right",
+                  fontWeight: idx === 0 ? 700 : 400
+                }}>
+                  {user.attempts}
+                </td>
               </tr>
-            ))
-            : (
-              <tr><td colSpan={3} style={{ textAlign: "center", padding: 10, color: "var(--text-secondary)" }}>No scores yet</td></tr>
+            )) : (
+              <tr>
+                <td colSpan={3}
+                  style={{
+                    textAlign: "center",
+                    padding: 14,
+                    color: "var(--text-secondary)"
+                  }}>
+                  No scores yet
+                </td>
+              </tr>
             )}
-        </tbody>
-      </table>
-      <div style={{ textAlign: "center", marginTop: 18 }}>
+          </tbody>
+        </table>
+      </div>
+      <div style={{ textAlign: "center" }}>
         <button
           className="btn"
           style={{
